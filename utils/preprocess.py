@@ -293,15 +293,15 @@ def preprocess(df):
     dist_array = calculate_peak_distances(len(df), final_events)
     df['dist_to_event'] = dist_array  # Assigning to DF automatically aligns it to DF index
 
-    to_drop=['x', 'y','x_smooth', 'y_smooth']
-    df=df.drop(columns=to_drop)
+    # to_drop=['x', 'y','x_smooth', 'y_smooth']
+    # df=df.drop(columns=to_drop)
     
     return   df
 
 
 def preprocessing_per_file(df,num=3):
     df=df[df['visible']==True].copy()
-    preprocess_df=preprocess(df)
+    preprocess_df=preprocess(df.copy())
   
     #df.drop(columns=['visible'])
     
@@ -334,8 +334,6 @@ def preprocessing_per_file(df,num=3):
 
     features = df[colnames]
 
-    
-    
         
     return preprocess_df.join(features)
 
@@ -411,6 +409,6 @@ def prepare_data_test(folder_path=DATA_FOLDER):
         
 if __name__ == "__main__":
     
-    full_df,original_df=prepare_data_test()
+    full_df=prepare_data()
 
     #full_df.to_csv('full_data_preprocessed.csv')

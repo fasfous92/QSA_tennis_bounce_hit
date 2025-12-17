@@ -12,6 +12,12 @@ from scipy.signal import find_peaks
 import os 
 import dotenv
 import warnings
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.signal import find_peaks
+from rdp import rdp 
+
 warnings.filterwarnings('ignore')
 
 
@@ -106,49 +112,36 @@ def windowed_acceleration(df, window_size=5):
     return ax, ay
 
 
-def fit_piecewise_linear(df, breakpoints):
-    """
-    The main idea behind this is to reconstruct our smooth and parabolic 
-    time series and make it fit in picewise linear function. This might help 
-    us making hits and  bounces more relevent and hence increase their selctability.
-    breakpoints are points where we observe certain peaks hence we use them as boundaries 
-    for our piecewise linear reconstruction.
-    """
-   
-    boundaries = sorted(list(set([0, len(df)] + list(breakpoints))))
-    
-    # Prepare an array to hold the linear reconstruction 
-    linear_fit = np.full(len(df), np.nan)
-    
-    # List to store the equation of each line: (slope, intercept)
-    line_equations = []
+def piecewise_peaks(df,column):
 
-    # 2. Iterate through each segment
-    for i in range(len(boundaries) - 1):
-        start, end = int(boundaries[i]), int(boundaries[i+1])
-        
-        X_segment = np.arange(start, end).reshape(-1, 1) 
-        y_segment = df['y'].iloc[start:end].values
-        
-        if len(y_segment) < 2:
-            continue
-            
-        # fit Linear Model
-        model = LinearRegression()
-        model.fit(X_segment, y_segment)
-        
-        y_pred = model.predict(X_segment)
-        
-        linear_fit[start:end] = y_pred
-        
-        line_equations.append({
-            'segment': (start, end),
-            'slope': model.coef_[0],      
-            'intercept': model.intercept_
-        })
-        
-    return linear_fit, line_equations
+    x = df.index.values
+    y_noisy = df[column].values
+    points = np.column_stack([x, y_noisy])
 
+    # 2. Get the Vertices 
+    epsilon = 7.0 
+    vertices = np.array(rdp(points, epsilon=epsilon), dtype=float)
+    vertex_x = vertices[:, 0]
+    vertex_y = vertices[:, 1]
+
+    # 3. Interpolate (Get the clean signal)
+    y_clean = np.interp(x, vertex_x, vertex_y)
+
+    # 4. Find Peaks 
+    peaks_indices, _ = find_peaks(y_clean, prominence=2) 
+
+    # --- NEW STEP: Create the Binary Column ---
+    # Initialize a column of zeros with the same length as your slice
+    binary_column = np.zeros(len(df), dtype=int)
+
+    # Set the peak locations to 1
+    binary_column[peaks_indices] = 1
+
+    # Add it to the DataFrame
+    df[f'{column}_is_peak'] = binary_column
+    df[f'{column}_smooth'] = y_clean # Optional: saving the clean signal too
+
+    return df
 
 def merge_close_points(points, threshold=10):
     """
@@ -256,8 +249,10 @@ def Kinematics(df, x_col='x', y_col='y', fps=30, smooth_window=3):
 
 def preprocess(df):
     #create a smooth version for better fixing of censors sensibility
-    df['x_smooth'] = savgol_filter(df['x'], window_length=7, polyorder=2)
-    df['y_smooth'] = savgol_filter(df['y'], window_length=7, polyorder=2)
+    df=piecewise_peaks(df,'y')
+    df=piecewise_peaks(df,'x')
+    # df['x_smooth'] = savgol_filter(df['x'], window_length=7, polyorder=2)
+    # df['y_smooth'] = savgol_filter(df['y'], window_length=7, polyorder=2)
     
     df=Kinematics(df, fps=30)
     #cosine similarity between velcoity before/after and also difference of speed 
@@ -293,25 +288,17 @@ def preprocess(df):
     dist_array = calculate_peak_distances(len(df), final_events)
     df['dist_to_event'] = dist_array  # Assigning to DF automatically aligns it to DF index
 
-    to_drop=['x', 'y', 'visible','x_smooth', 'y_smooth']
-    df=df.drop(columns=to_drop)
+    # to_drop=['x', 'y','x_smooth', 'y_smooth']
+    # df=df.drop(columns=to_drop)
     
     return   df
 
 
-def preprocessing_per_file(df,num=3, is_test=False):
-    
-    # In Train, we drop invisible points. In Test, we must keep them to maintain 1-1 mapping.
-    if not is_test:
-        df=df[df['visible']==True].copy()
-    else:
-        # If testing, ensure we fill NaN x/y (if any) so savgol/kinematics don't crash
-        df['x'] = df['x'].interpolate(limit_direction='both').fillna(0)
-        df['y'] = df['y'].interpolate(limit_direction='both').fillna(0)
-
-    preprocess_df=preprocess(df)
-
-    df.drop(columns=['visible'])
+def preprocessing_per_file(df,num=3):
+    df=df[df['visible']==True].copy()
+    preprocess_df=preprocess(df.copy())
+  
+    #df.drop(columns=['visible'])
     
     eps = 1e-15
     for i in range(1, num):
@@ -327,14 +314,9 @@ def preprocessing_per_file(df,num=3, is_test=False):
         df['y_div_{}'.format(i)] = df['y_diff_{}'.format(i)]/(df['y_diff_inv_{}'.format(i)] + eps)
     
     
-    # Only drop rows in Train mode. In Test mode, we keep them and fill NaNs.
-    if not is_test:
-        for i in range(1, num):
-            df = df[df['x_lag_{}'.format(i)].notna()]
-            df = df[df['x_lag_inv_{}'.format(i)].notna()]
-    else:
-        # Fill the NaNs created by shifting so we don't lose the edges
-        df = df.fillna(df.mean(numeric_only=True))
+    # for i in range(1, num):
+    #     df = df[df['x_lag_{}'.format(i)].notna()]
+    #     df = df[df['x_lag_inv_{}'.format(i)].notna()]
         
         
     colnames_x = ['x_diff_{}'.format(i) for i in range(1, num)] + \
@@ -346,8 +328,7 @@ def preprocessing_per_file(df,num=3, is_test=False):
     colnames = colnames_x + colnames_y
 
     features = df[colnames]
-    
-    
+
         
     return preprocess_df.join(features)
 
@@ -367,8 +348,7 @@ def prepare_data(folder_path=DATA_FOLDER):
         df_temp = pd.read_json(filepath)
         df_temp=df_temp.T
         
-        # Train mode: is_test=False (Default)
-        df_temp=preprocessing_per_file(df_temp,num=5, is_test=False)
+        df_temp=preprocessing_per_file(df_temp,num=5)
         
         frames_list.append(df_temp)
         
@@ -376,43 +356,55 @@ def prepare_data(folder_path=DATA_FOLDER):
 
     # Concatenate all files into one distinct DataFrame
     full_df = pd.concat(frames_list)
+    print(full_df.isna().sum())
 
     print(f"Successfully created 'full_df' with shape: {full_df.shape}")
     return full_df
 
-def prepare_data_test(folder_path=DATA_FOLDER):
+def prepare_data_test(folder_path=DATA_FOLDER):  
+    # here we assume that all our test data would have a visible "True"
+    # meaning x and y values are there not nan
+    ASSUMPTION=False #can be changes if decides else our model would just get avg. for the nan values
 
 
     frames_list = []
     frames_original=[]
 
-    print(f"Acessing data from {folder_path}")
+    print(f"Acessing data from {DATA_FOLDER}")
 
     # 2. Loop through every file in the folder
-    for filename in tqdm(os.listdir(folder_path)):
+    for filename in tqdm(os.listdir(DATA_FOLDER)):
 
-        filepath = os.path.join(folder_path, filename)
+        filepath = os.path.join(DATA_FOLDER, filename)
         df_temp = pd.read_json(filepath)
         df_temp=df_temp.T
-        frames_original.append(df_temp)
+        if not ASSUMPTION:
+            df_temp['x'] = df_temp['x'].ffill().bfill()
+            df_temp['y'] = df_temp['y'].ffill().bfill() #better then avg
+            df_temp['visible'] = True
         
-        # Test mode: is_test=True (Prevents row deletion)
-        df_temp=preprocessing_per_file(df_temp, num=5, is_test=True)
+        
+        frames_original.append(df_temp.copy())
+        
+        df_temp=preprocessing_per_file(df_temp,num=5)
         
         frames_list.append(df_temp)
-        
 
 
     # Concatenate all files into one distinct DataFrame
+    print(len(frames_list))
+    print(len(frames_original))
     full_df = pd.concat(frames_list)
     original_df=pd.concat(frames_original)
-    #print(full_df.columns)
 
     print(f"Successfully created 'full_df' with shape: {full_df.shape}")
+    print(f"original df  shape: {original_df.shape}")
+
     return full_df,original_df
         
 if __name__ == "__main__":
     
     full_df=prepare_data()
+    print(full_df.columns)
 
-    full_df.to_csv('full_data_preprocessed.csv')
+    #full_df.to_csv('full_data_preprocessed.csv')
