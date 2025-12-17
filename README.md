@@ -1,1 +1,0 @@
-# QSA_tennis_bounce_hit
