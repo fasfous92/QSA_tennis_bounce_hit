@@ -411,4 +411,4 @@ if __name__ == "__main__":
     
     full_df=prepare_data()
 
-    #full_df.to_csv('full_data_preprocessed.csv')
+    full_df.to_csv('full_data_preprocessed.csv')

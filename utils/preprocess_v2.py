@@ -246,14 +246,72 @@ def Kinematics(df, x_col='x', y_col='y', fps=30, smooth_window=3):
 
 
 
+import cv2
+
+def transform_ball_data(df, x_col='x', y_col='y'):
+    """
+    Transforms a DataFrame of pixel coordinates into real-world meters.
+    Origin (0,0) is the center of the Net.
+    """
+    
+    # 1. Define the Court Reference (Based on your Point 1-4 data)
+    # [x_pixel, y_pixel]
+    pixel_coords = np.array([
+        [1500, 792], # Point 1: Near Baseline Right
+        [861, 620],  # Point 2: Near Service Center
+        [861, 383],  # Point 3: Net Center
+        [1250, 316]  # Point 4: Far Service Right
+    ], dtype=np.float32)
+
+    # Real-world [X_lateral, Z_depth] in meters
+    # (Values based on standard professional court dimensions)
+    real_coords = np.array([
+        [5.485, 11.89], # Baseline Right (doubles)
+        [0, 6.40],      # Service Center Near
+        [0, 0],         # Net Center
+        [4.115, -6.40]  # Service Right Far (singles)
+    ], dtype=np.float32)
+
+    # 2. Create the Transformation Matrix
+    matrix, _ = cv2.findHomography(pixel_coords, real_coords)
+
+    # 3. Apply transformation to the entire DataFrame
+    def apply_homography(row):
+        # Handle cases where tracking might be missing (NaN)
+        if pd.isna(row[x_col]) or pd.isna(row[y_col]):
+            return pd.Series([np.nan, np.nan])
+        
+        # Prepare the pixel point
+        pt = np.array([[[row[x_col], row[y_col]]]], dtype=np.float32)
+        # Transform to meters
+        transformed = cv2.perspectiveTransform(pt, matrix)
+        return pd.Series([transformed[0][0][0], transformed[0][0][1]])
+
+    # Create new columns in the original DF
+    df[['x_smooth', 'y_smooth']] = df.apply(apply_homography, axis=1)
+
+    # 4. Cleanup: Clip 'Z' and Smooth the series
+    # A tennis court is roughly 24m long. 
+    # If Z > 30 or Z < -30, it's likely noise near the horizon.
+    #df['real_z'] = df['real_z'].clip(lower=-25, upper=25)
+    
+    # Apply a rolling window to smooth the 'jitter' on the far side
+    #df['real_z_smooth'] = df['real_z'].rolling(window=3, min_periods=1).mean()
+    
+    return df
+
+# --- Example Usage ---
+# Assume 'df_tracking' has your 'x_pixel' and 'y_pixel' columns
+# df_result = transform_ball_data(df_tracking, x_col='x_pixel', y_col='y_pixel')
+
 
 def preprocess(df):
     #create a smooth version for better fixing of censors sensibility
-    df=piecewise_peaks(df,'y')
-    df=piecewise_peaks(df,'x')
+    # df=piecewise_peaks(df,'y')
+    # df=piecewise_peaks(df,'x')
     # df['x_smooth'] = savgol_filter(df['x'], window_length=7, polyorder=2)
     # df['y_smooth'] = savgol_filter(df['y'], window_length=7, polyorder=2)
-    
+    df=transform_ball_data(df)
     df=Kinematics(df, fps=30)
     #cosine similarity between velcoity before/after and also difference of speed 
     df['cosine_sim'],df['speed_delta'] = cosine_similarity_rows(df, 4)
@@ -406,5 +464,6 @@ if __name__ == "__main__":
     
     full_df=prepare_data()
     print(full_df.columns)
+    print(full_df.describe())
 
     #full_df.to_csv('full_data_preprocessed.csv')

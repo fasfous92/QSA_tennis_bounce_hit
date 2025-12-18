@@ -103,3 +103,13 @@ Because tennis rallies are repetitive, it would also be interesting to cluster r
 
 * If we are at time t and we know that at t - \mu there was a bounce, there is a very high chance that the next detected anomaly will be a hit.
 
+
+
+# Ideas 
+## 1. The "Ground-Plane" 
+
+TransformThe $y$ pixel in your video is not a linear measure of distance because of perspective. A ball moving 10 pixels at the top of the screen travels much further in real life than a ball moving 10 pixels at the bottom.To fix this, we use the camera height ($H$) and the distance to the baseline ($D_{base}$) to create a Depth Series ($Z$).The Logic:Imagine a triangle where the camera is the top point.The vertical side is Camera Height ($H$).The horizontal side is the Distance along the ground ($Z$).The angle $\theta$ is determined by the $y$-pixel.The Calculation:You can convert every $y$ pixel into a Real-World Distance ($Z$) from the camera using this ratio:$$Z(t) = H \times \frac{f}{y(t) - y_{horizon}}$$(Where $f$ is a constant related to your camera lens and $y_{horizon}$ is the pixel level of the horizon line).
+
+
+
+One very good advantage about a ball that is about to bounce it's it get closer to the ground hence 
