@@ -251,7 +251,37 @@ def Kinematics(df, x_col='x', y_col='y', fps=30, smooth_window=3):
   
     return df
 
+def calculate_physics_deltas(df):
+    """
+    Calculates vertical velocity (vy) and the delta between consecutive frames.
+    Creates columns 'vy_before', 'vy_after', and 'delta_vy'.
+    """
+    df = df.copy()
+   
 
+    
+    # 1. Ensure we have Vertical Velocity (vy)
+    # If you don't have 'vy' or 'dy', we calculate it from 'y'
+    if 'vy' not in df.columns:
+        if 'dy' in df.columns:
+            df['vy'] = df['dy']
+        else:
+            # Calculate velocity: change in y per frame
+            # We use fillna(0) to handle the first frame
+            df['vy'] = df['y'].diff().fillna(0)
+
+    # 2. Get "vy_before" and "vy_after"
+    # vy_after  = The velocity at the CURRENT frame (t)
+    # vy_before = The velocity at the PREVIOUS frame (t-1)
+    df['vy_after'] = df['vy']
+    df['vy_before'] = df['vy'].shift(1).fillna(0)
+
+    # 3. Calculate the Delta (The change in velocity)
+    # A Bounce is a massive positive spike in this value (e.g., -5 -> +5 = delta of +10)
+    df['delta_vy'] = df['vy_after'] - df['vy_before']
+    
+
+    return df
 
 
 def preprocess(df):
@@ -302,6 +332,7 @@ def preprocess(df):
 def preprocessing_per_file(df,num=3):
     df=df[df['visible']==True].copy()
     preprocess_df=preprocess(df.copy())
+    preprocess_df=calculate_physics_deltas(preprocess_df)
   
     #df.drop(columns=['visible'])
     
@@ -383,13 +414,14 @@ def prepare_data_test(folder_path=DATA_FOLDER):
         filepath = os.path.join(DATA_FOLDER, filename)
         df_temp = pd.read_json(filepath)
         df_temp=df_temp.T
+        frames_original.append(df_temp.copy())
+
         if not ASSUMPTION:
             df_temp['x'] = df_temp['x'].ffill().bfill()
             df_temp['y'] = df_temp['y'].ffill().bfill() #better then avg
             df_temp['visible'] = True
         
         
-        frames_original.append(df_temp.copy())
         
         df_temp=preprocessing_per_file(df_temp,num=5)
         
@@ -407,8 +439,8 @@ def prepare_data_test(folder_path=DATA_FOLDER):
 
     return full_df,original_df
         
-if __name__ == "__main__":
-    
-    full_df=prepare_data()
+# if __name__ == "__main__":
 
-    full_df.to_csv('full_data_preprocessed.csv')
+# # full_df=prepare_data()
+# # print(full_df.columns)
+# # full_df.to_csv('full_data_preprocessed.csv')

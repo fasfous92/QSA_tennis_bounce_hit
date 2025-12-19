@@ -51,6 +51,7 @@ docs/_build/
 
 #data file 
 data/
+test_data/
 others/
 catboost_info/
 eda_notebooks/
