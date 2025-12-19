@@ -3,8 +3,26 @@
 Our dataset contains time-series sequences from rallies during the 2025 Roland Garros final. The goal is to develop two ways to predict ball events: a **supervised learning** method and an **unsupervised method**.
 
 ---
+## Instruction for running the models
+<details>
 
-# 1. Supervised Approach
+##### 1. Installation and Setup
+
+*Install Requirements:* Ensure your Python environment is prepared by installing the necessary dependencies listed in the **requirements.txt** file.
+
+*Environment Configuration:* Update the **.env** file with the paths to your training and test datasets.
+
+*Provide the folder path for the data * Ensure the directory contains JSON files matching the required data format (see the data_example/ folder for a reference template).
+
+🚀 Running Predictions
+
+**Model Access:** The trained models and their specific hyperparameters are located in the models/ directory.
+
+**Execution:** Run the main.py file to generate predictions using the pre-trained models.
+
+**Outputs:** Once the process is complete, all generated results will be stored in the **output/** folder.
+
+</details>
 
 ## Feature Engineering
 
@@ -66,50 +84,117 @@ To give the model "memory," we look at the frames before and after the current m
 ---
 </details>
 
- 
+# 1. Supervised Approach
+
 
 ## Model
 
-Due to time constraints, we did not test many different models. We focused on models that are successful with tabular data, such as **XGBoost**, **CatBoost**, and **LightGBM**. The results were very similar, so we chose to move forward with the **LightGBM** model.
+To achieve high performance on our tabular trajectory data, we evaluated several gradient-boosted decision tree (GBDT) frameworks known for their efficiency and accuracy: XGBoost, CatBoost, and LightGBM.
 
-We performed a grid search to optimize the model, but it did not show a significant improvement.
+While initial baseline results were comparable across all three architectures, we performed an extensive Grid Search optimization on the LightGBM classifier to fine-tune its hyperparameters. This optimization phase proved critical; as demonstrated in the performance comparison below, the tuned LightGBM model shows a considerable improvement in classification accuracy and precision over the initial baseline CatBoost implementation.
+
+Performance Comparison
+1. **Baseline Model (CatBoost)**
+This initial model provided a solid starting point but struggled with certain edge cases in ball-action detection.
+
+2. **Optimized Model (LightGBM + Grid Search)**
+After hyperparameter tuning, the LightGBM model shows significantly better separation between "Hits" and "Bounces," reducing false positives in the "Air" category.
+
 <html>
-    <p align="center">
-        <img src="./img/confusion_matrix_lgbm.png" alt="Supervised Model Confusionmatrix"width="400">
+    <p align='center' >
+        <img src="./img/confusion_matrix_before.png" alt="Supervised Model Confusionmatrix"width="400">
+        <img src="./img/confusion_matrix_after.png" alt="Supervised Model Confusionmatrix"width="400">
     </p>
 </html>
 
-The first thing to notice in our confusion matrix is the class imbalance, which relates directly to our view of this task as an anomaly detection problem.
+The primary characteristic of our confusion matrix is the extreme class imbalance, which validates our approach of treating this task as an anomaly detection problem. Because "Air" frames vastly outnumber "Hit" and "Bounce" events, the model must isolate rare signals from a dominant background.
 
-As shown in the matrix, despite some minor weaknesses, our supervised model is very effective at distinguishing between a hit and a bounce. This is a significant advantage over our unsupervised approach, where the two events were often confused because their mathematical patterns appear very similar.
-
-
+While minor edge cases exist, the supervised model demonstrates a high level of efficacy in distinguishing between a "Hit" and a "Bounce". This represents a critical improvement over the unsupervised approach. In the unsupervised setting, these two events were frequently misclassified because they share nearly identical mathematical signatures; however, supervised learning allows the model to capture the subtle physics-based nuances that differentiate them.
 
 
+# 2. Unsupervised Approach
+
+Implementing the unsupervised approach presented a significant challenge, as we lacked the luxury of using models that could automatically find hidden links between our target labels and the generated features. This difficulty was compounded by our high number of dimensions (many columns), which caused standard clustering algorithms to struggle.
+
+To solve this, we tested several dimensionality reduction techniques, including PCA, t-SNE, and UMAP, ultimately choosing UMAP for its performance. Through experimentation, we realized that "Hit" and "Bounce" events were essentially anomalies due to the massive class imbalance. Based on this, we structured our unsupervised pipeline into two distinct phases:
+
+## Phase 1: Event Detection
+The goal here was to separate "Air" balls from "Other" (potential event) balls.
+
+We applied UMAP using specific columns that exaggerated the physical differences between these states.
+
+Even after embedding, identifying clear clusters remained difficult, so we used a Gaussian Mixture Model (GMM) with 7 components.
+
+We selected the cluster containing the highest concentration of "Other" points to pass into the next stage; all points outside this cluster were classified as "Air".
+
+<html>
+    <p align='center' >
+        <img src="./img/phas1_embed.png" alt="Supervised Model Confusionmatrix"width="400">
+        <img src="./img/clust_1.png" alt="Supervised Model Confusionmatrix"width="400">
+    </p>
+</html>
+## Phase 2: Event Classification
+The second phase followed a similar logic but used a different set of columns to differentiate between types of events.
+
+After another UMAP projection and a GMM with 7 components, we assigned labels to each cluster based on their membership.
+
+To handle the remaining "Air" noise, we applied a 10% threshold rule: if a cluster consisted of at least 10% "Hits" or "Bounces," the entire cluster was labeled as that event.
+
+If a cluster met the threshold for both, we assigned the label of the highest representative.
+
+<html>
+    <p align='center' >
+        <img src="./img/phas2_embed.png" alt="Supervised Model Confusionmatrix"width="400">
+        <img src="./img/clust_2.png" alt="Supervised Model Confusionmatrix"width="400">
+    </p>
+</html>
+
+### Priority logic for assigning cluster labels: 
+    if pct_hit > 0.10 and pct_hit > pct_bounce:
+        cluster_mapping[cluster_id] = 'hit'
+    elif pct_bounce > 0.10:
+        cluster_mapping[cluster_id] = 'bounce'
+    else:
+        cluster_mapping[cluster_id] = 'air'
+ 
+## Inference Pipeline
+
+This entire process was used for training. Once complete, we stored the cluster mappings, the UMAP embeddings, and the GMM models. For testing or new data, the ball coordinates go through this exact same pipeline, and the final prediction is granted based on which cluster the data lands in.
 
 
 
 
+It is clear that you are framing the trajectory of a tennis ball as a time-series problem where events are outliers. Based on your project notes and the code in your files, here is a reformulation of your future ideas for a professional report or README.
+
+### Future Work & Discussion
+
+#### 1. Advanced Anomaly Detection Pipeline
+
+Currently, our model attempts to classify every frame simultaneously. A more robust approach would be to treat the task as a two-stage **Anomaly Detection** problem:
+
+* **Stage 1 (Point Anomaly Detection):** Use time-series algorithms to identify "spikes" or anomalies in the trajectory data, effectively filtering out the "Air" (background) frames.
+* **Stage 2 (Event Classification):** Once an anomaly is detected, a secondary classifier determines if that specific point represents a **Hit** or a **Bounce**.
+
+#### 2. Temporal Logic & Rally Pattern Clustering
+
+Since tennis rallies are repetitive, we can improve real-time detection by using the history of the rally to predict the future. We can model the probability of events based on the time elapsed since the last anomaly:
+
+* **Conditional Probability:** If a **Bounce** was detected at time , there is a statistically higher probability that the next anomaly at time  will be a **Hit**.
+* **Rally Clustering:** By clustering entire rallies together, we can identify common play patterns, allowing the model to "expect" certain actions based on the style of the rally.
+
+#### 3. Geometric Perspective Correction (3D Depth Mapping)
+
+One limitation of using raw pixel coordinates is that the -pixel is non-linear due to camera perspective; a 10-pixel movement at the top of the frame represents a much larger physical distance than at the bottom. To improve accuracy, we propose converting -pixels into a **Real-World Depth Series ()**:
+
+Using the camera height (), focal length (), and the horizon line (), we can map coordinates to a 3D space:
 
 
 
+This would allow the model to calculate actual physical velocity and acceleration, making "Hits" much easier to distinguish from "Air".
 
+#### 4. Unsupervised Feature Engineering & Deep Embeddings
 
-# Discussions and Improvements
+While our current unsupervised approach relies on manual feature engineering, future iterations should explore **Autoencoders** or **Transformers** for generating embeddings.
 
-Our project is very similar to an **anomaly detection** model. Since the ball is in flight for most of the rally, a hit or a bounce can be seen as a "spike" or anomaly in the data. A future improvement could involve using **point anomaly detection** on the time series first, and then classifying the type of anomaly (bounce vs. hit) in a second step.
-
-Because tennis rallies are repetitive, it would also be interesting to cluster rallies together to find common patterns. This could lead to models that detect events in real-time by using the history of the current rally:
-
-* If we are at time t and we know that at t - \mu there was a bounce, there is a very high chance that the next detected anomaly will be a hit.
-
-
-
-# Ideas 
-## 1. The "Ground-Plane" 
-
-TransformThe $y$ pixel in your video is not a linear measure of distance because of perspective. A ball moving 10 pixels at the top of the screen travels much further in real life than a ball moving 10 pixels at the bottom.To fix this, we use the camera height ($H$) and the distance to the baseline ($D_{base}$) to create a Depth Series ($Z$).The Logic:Imagine a triangle where the camera is the top point.The vertical side is Camera Height ($H$).The horizontal side is the Distance along the ground ($Z$).The angle $\theta$ is determined by the $y$-pixel.The Calculation:You can convert every $y$ pixel into a Real-World Distance ($Z$) from the camera using this ratio:$$Z(t) = H \times \frac{f}{y(t) - y_{horizon}}$$(Where $f$ is a constant related to your camera lens and $y_{horizon}$ is the pixel level of the horizon line).
-
-
-
-One very good advantage about a ball that is about to bounce it's it get closer to the ground hence 
+* **Contextual Information:** Transformers are particularly well-suited for this as they capture information from neighboring points, which is a vital indicator of action type.
+* **Two-Stage Unsupervised Logic:** Similar to our supervised idea, the first stage of unsupervised learning should focus on separating "Air" from "Other" through anomaly detection, with specific feature engineering designed to exaggerate those differences before clustering the results in Phase 2.
